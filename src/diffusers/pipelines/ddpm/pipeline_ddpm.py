@@ -66,8 +66,8 @@ class DDPMPipeline(DiffusionPipeline):
         batch_size: int = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         num_inference_steps: int = 1000,
-        masks: Optional[PIL.Image] = None, # bad code
-        nodules: Optional[PIL.Image] = None, # bad code
+        masks = None, # bad code
+        nodules = None, # bad code
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
     ) -> Union[ImagePipelineOutput, Tuple]:
