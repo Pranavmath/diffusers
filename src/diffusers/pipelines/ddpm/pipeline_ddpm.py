@@ -14,6 +14,7 @@
 
 
 from typing import List, Optional, Tuple, Union
+from PIL import Image
 
 import torch
 
@@ -42,86 +43,77 @@ class DDPMPipeline(DiffusionPipeline):
         super().__init__()
         self.register_modules(unet=unet, scheduler=scheduler)
 
+        self.mask_preprocess = transforms.Compose(
+            [
+                transforms.Resize((self.unet.config.sample_size, self.unet.config.sample_size)),
+                transforms.Grayscale(num_output_channels=1),
+                transforms.ToTensor(),
+            ]
+        )
+
+        self.image_preprocess = transforms.Compose(
+            [
+                transforms.Resize((self.unet.config.sample_size, self.unet.config.sample_size)),
+                transforms.Grayscale(num_output_channels=1),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5], [0.5]),
+            ]
+        )
+
     @torch.no_grad()
     def __call__(
         self,
         batch_size: int = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         num_inference_steps: int = 1000,
+        masks: List[PIL.Image],
+        nodules: List[PIL.Image],
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
     ) -> Union[ImagePipelineOutput, Tuple]:
-        r"""
-        The call function to the pipeline for generation.
+        assert len(masks) == len(nodules) == batch_size
 
-        Args:
-            batch_size (`int`, *optional*, defaults to 1):
-                The number of images to generate.
-            generator (`torch.Generator`, *optional*):
-                A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
-                generation deterministic.
-            num_inference_steps (`int`, *optional*, defaults to 1000):
-                The number of denoising steps. More denoising steps usually lead to a higher quality image at the
-                expense of slower inference.
-            output_type (`str`, *optional*, defaults to `"pil"`):
-                The output format of the generated image. Choose between `PIL.Image` or `np.array`.
-            return_dict (`bool`, *optional*, defaults to `True`):
-                Whether or not to return a [`~pipelines.ImagePipelineOutput`] instead of a plain tuple.
-
-        Example:
-
-        ```py
-        >>> from diffusers import DDPMPipeline
-
-        >>> # load model and scheduler
-        >>> pipe = DDPMPipeline.from_pretrained("google/ddpm-cat-256")
-
-        >>> # run pipeline in inference (sample random noise and denoise)
-        >>> image = pipe().images[0]
-
-        >>> # save image
-        >>> image.save("ddpm_generated_image.png")
-        ```
-
-        Returns:
-            [`~pipelines.ImagePipelineOutput`] or `tuple`:
-                If `return_dict` is `True`, [`~pipelines.ImagePipelineOutput`] is returned, otherwise a `tuple` is
-                returned where the first element is a list with the generated images
-        """
-        # Sample gaussian noise to begin loop
-        if isinstance(self.unet.config.sample_size, int):
-            image_shape = (
-                batch_size,
-                self.unet.config.in_channels,
-                self.unet.config.sample_size,
-                self.unet.config.sample_size,
-            )
-        else:
-            image_shape = (batch_size, self.unet.config.in_channels, *self.unet.config.sample_size)
-
-        if self.device.type == "mps":
-            # randn does not work reproducibly on mps
-            image = randn_tensor(image_shape, generator=generator, dtype=self.unet.dtype)
-            image = image.to(self.device)
-        else:
-            image = randn_tensor(image_shape, generator=generator, device=self.device, dtype=self.unet.dtype)
-
-        # set step values
-        self.scheduler.set_timesteps(num_inference_steps)
-
-        for t in self.progress_bar(self.scheduler.timesteps):
-            # 1. predict noise model_output
-            model_output = self.unet(image, t).sample
-
-            # 2. compute previous image: x_t -> x_t-1
-            image = self.scheduler.step(model_output, t, image, generator=generator).prev_sample
-
-        image = (image / 2 + 0.5).clamp(0, 1)
-        image = image.cpu().permute(0, 2, 3, 1).numpy()
-        if output_type == "pil":
-            image = self.numpy_to_pil(image)
-
-        if not return_dict:
-            return (image,)
-
-        return ImagePipelineOutput(images=image)
+        for idx in range(batch_size):
+            nodule, mask = nodules[idx], masks[idx]
+            nodule, mask = self.image_preprocess(nodule).unsqueeze(0), self.mask_preprocess(mask).unsqueeze(0)
+            
+            # Sample gaussian noise to begin loop
+            if isinstance(self.unet.config.sample_size, int):
+                image_shape = (
+                    1,
+                    self.unet.config.in_channels,
+                    self.unet.config.sample_size,
+                    self.unet.config.sample_size,
+                )
+            else:
+                image_shape = (1, self.unet.config.in_channels, *self.unet.config.sample_size)
+    
+            if self.device.type == "mps":
+                # randn does not work reproducibly on mps
+                image = randn_tensor(image_shape, generator=generator, dtype=self.unet.dtype)
+                image = image.to(self.device)
+            else:
+                image = randn_tensor(image_shape, generator=generator, device=self.device, dtype=self.unet.dtype)
+    
+            # set step values
+            self.scheduler.set_timesteps(num_inference_steps)
+    
+            for t in self.progress_bar(self.scheduler.timesteps):
+                # 1. make sure that the image has non inpainted part as original image and inpainted part as noise
+                image = image * mask + (1-mask) * nodule
+                
+                # 2. predict noise model_output
+                model_output = self.unet(image, t).sample
+    
+                # 3. compute previous image: x_t -> x_t-1
+                image = self.scheduler.step(model_output, t, image, generator=generator).prev_sample
+    
+            image = (image / 2 + 0.5).clamp(0, 1)
+            image = image.cpu().permute(0, 2, 3, 1).numpy()
+            if output_type == "pil":
+                image = self.numpy_to_pil(image)
+    
+            if not return_dict:
+                return (image,)
+    
+            return ImagePipelineOutput(images=image)
