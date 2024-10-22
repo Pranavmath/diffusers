@@ -76,7 +76,7 @@ class DDPMPipeline(DiffusionPipeline):
 
         for idx in range(batch_size):
             nodule, mask = nodules[idx], masks[idx]
-            nodule, mask = self.image_preprocess(nodule).unsqueeze(0), self.mask_preprocess(mask).unsqueeze(0)
+            nodule, mask = self.image_preprocess(nodule).unsqueeze(0).to(device), self.mask_preprocess(mask).unsqueeze(0).to(device)
             
             # Sample gaussian noise to begin loop
             if isinstance(self.unet.config.sample_size, int):
