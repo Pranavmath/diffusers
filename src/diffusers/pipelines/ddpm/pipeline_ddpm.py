@@ -17,6 +17,7 @@ from typing import List, Optional, Tuple, Union
 import PIL
 
 import torch
+from torchvision import transforms
 
 from ...utils.torch_utils import randn_tensor
 from ..pipeline_utils import DiffusionPipeline, ImagePipelineOutput
