@@ -74,52 +74,47 @@ class DDPMPipeline(DiffusionPipeline):
     ) -> Union[ImagePipelineOutput, Tuple]:
         assert len(masks) == len(nodules) == batch_size
 
-        images = []
+        nodules = nodules.to(self.device)
+        masks = masks.to(self.device)
+        
+        # Sample gaussian noise to begin loop
+        if isinstance(self.unet.config.sample_size, int):
+            image_shape = (
+                batch_size,
+                self.unet.config.in_channels,
+                self.unet.config.sample_size,
+                self.unet.config.sample_size,
+            )
+        else:
+            image_shape = (1, self.unet.config.in_channels, *self.unet.config.sample_size)
 
-        for idx in range(batch_size):
-            nodule, mask = nodules[idx], masks[idx]
-            nodule, mask = self.image_preprocess(nodule).unsqueeze(0).to(self.device), self.mask_preprocess(mask).unsqueeze(0).to(self.device)
-            
-            # Sample gaussian noise to begin loop
-            if isinstance(self.unet.config.sample_size, int):
-                image_shape = (
-                    1,
-                    self.unet.config.in_channels,
-                    self.unet.config.sample_size,
-                    self.unet.config.sample_size,
-                )
-            else:
-                image_shape = (1, self.unet.config.in_channels, *self.unet.config.sample_size)
-    
-            if self.device.type == "mps":
-                # randn does not work reproducibly on mps
-                image = randn_tensor(image_shape, generator=generator, dtype=self.unet.dtype)
-                image = image.to(self.device)
-            else:
-                image = randn_tensor(image_shape, generator=generator, device=self.device, dtype=self.unet.dtype)
-    
-            # set step values
-            self.scheduler.set_timesteps(num_inference_steps)
-    
-            for t in self.progress_bar(self.scheduler.timesteps):
-                # 1. make sure that the image has non inpainted part as original image and inpainted part as noise
-                image = image * mask + (1-mask) * nodule
-                
-                # 2. predict noise model_output
-                model_output = self.unet(image, t).sample
-    
-                # 3. compute previous image: x_t -> x_t-1
-                image = self.scheduler.step(model_output, t, image, generator=generator).prev_sample
-    
-            image = (image / 2 + 0.5).clamp(0, 1)
-            image = image.cpu().permute(0, 2, 3, 1).numpy()
-            
-            if output_type == "pil":
-                image = self.numpy_to_pil(image)
+        if self.device.type == "mps":
+            # randn does not work reproducibly on mps
+            image = randn_tensor(image_shape, generator=generator, dtype=self.unet.dtype)
+            image = image.to(self.device)
+        else:
+            image = randn_tensor(image_shape, generator=generator, device=self.device, dtype=self.unet.dtype)
 
-            images.append(image)
+        # set step values
+        self.scheduler.set_timesteps(num_inference_steps)
+
+        for t in self.progress_bar(self.scheduler.timesteps):
+            # 1. make sure that the image has non inpainted part as original image and inpainted part as noise
+            image = image * masks + (1-masks) * nodule
+            
+            # 2. predict noise model_output
+            model_output = self.unet(image, t).sample
+
+            # 3. compute previous image: x_t -> x_t-1
+            image = self.scheduler.step(model_output, t, image, generator=generator).prev_sample
+
+        image = (image / 2 + 0.5).clamp(0, 1)
+        image = image.cpu().permute(0, 2, 3, 1).numpy()
+        
+        if output_type == "pil":
+            image = self.numpy_to_pil(image)
     
         if not return_dict:
-            return (images,)
+            return (image,)
 
-        return ImagePipelineOutput(images=images)
+        return ImagePipelineOutput(images=image)
