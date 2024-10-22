@@ -100,7 +100,7 @@ class DDPMPipeline(DiffusionPipeline):
 
         for t in self.progress_bar(self.scheduler.timesteps):
             # 1. make sure that the image has non inpainted part as original image and inpainted part as noise
-            image = image * masks + (1-masks) * nodule
+            image = image * masks + (1-masks) * nodules
             
             # 2. predict noise model_output
             model_output = self.unet(image, t).sample
