@@ -74,6 +74,8 @@ class DDPMPipeline(DiffusionPipeline):
     ) -> Union[ImagePipelineOutput, Tuple]:
         assert len(masks) == len(nodules) == batch_size
 
+        images = []
+
         for idx in range(batch_size):
             nodule, mask = nodules[idx], masks[idx]
             nodule, mask = self.image_preprocess(nodule).unsqueeze(0).to(self.device), self.mask_preprocess(mask).unsqueeze(0).to(self.device)
@@ -111,10 +113,13 @@ class DDPMPipeline(DiffusionPipeline):
     
             image = (image / 2 + 0.5).clamp(0, 1)
             image = image.cpu().permute(0, 2, 3, 1).numpy()
+            
             if output_type == "pil":
                 image = self.numpy_to_pil(image)
+
+            images.append(image)
     
-            if not return_dict:
-                return (image,)
-    
-            return ImagePipelineOutput(images=image)
+        if not return_dict:
+            return (images,)
+
+        return ImagePipelineOutput(images=images)
