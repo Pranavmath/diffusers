@@ -14,7 +14,7 @@
 
 
 from typing import List, Optional, Tuple, Union
-from PIL import Image
+import PIL
 
 import torch
 
