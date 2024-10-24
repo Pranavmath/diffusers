@@ -108,6 +108,8 @@ class DDPMPipeline(DiffusionPipeline):
             # 3. compute previous image: x_t -> x_t-1
             image = self.scheduler.step(model_output, t, image, generator=generator).prev_sample
 
+            print(image.shape)
+
         image = (image / 2 + 0.5).clamp(0, 1)
         image = image.cpu().permute(0, 2, 3, 1).numpy()
         
