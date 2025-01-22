@@ -53,6 +53,8 @@ class DDIMPipeline(DiffusionPipeline):
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         eta: float = 0.0,
         num_inference_steps: int = 50,
+        masks = None,
+        nodules = None,
         use_clipped_model_output: Optional[bool] = None,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
@@ -110,6 +112,11 @@ class DDIMPipeline(DiffusionPipeline):
                 returned where the first element is a list with the generated images
         """
 
+        masks = masks.to(self._execution_device)
+        nodules = nodules.to(self._execution_device)
+
+        assert len(masks) == len(nodules) == batch_size
+
         # Sample gaussian noise to begin loop
         if isinstance(self.unet.config.sample_size, int):
             image_shape = (
@@ -133,10 +140,13 @@ class DDIMPipeline(DiffusionPipeline):
         self.scheduler.set_timesteps(num_inference_steps)
 
         for t in self.progress_bar(self.scheduler.timesteps):
-            # 1. predict noise model_output
+            # 1. make sure that the image has non inpainted part as original image and inpainted part as noise
+            image = image * masks + (1-masks) * nodules
+            
+            # 2. predict noise model_output
             model_output = self.unet(image, t).sample
 
-            # 2. predict previous mean of image x_t-1 and add variance depending on eta
+            # 3. predict previous mean of image x_t-1 and add variance depending on eta
             # eta corresponds to η in paper and should be between [0, 1]
             # do x_t -> x_t-1
             image = self.scheduler.step(
